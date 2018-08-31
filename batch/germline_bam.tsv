@@ -1,0 +1,6 @@
+BAM	OUTPUT_BUCKET
+gs://my-bam/wellformedBAM1.bam	gs://out-bam/sample1
+gs://my-bam/wellformedBAM2.bam	gs://out-bam/sample2
+gs://my-bam/wellformedBAM3.bam	gs://out-bam/sample3
+gs://my-bam/wellformedBAM4.bam	gs://out-bam/sample4
+gs://my-bam/wellformedBAM5.bam	gs://out-bam/sample5

@@ -1,0 +1,10 @@
+{
+  "REF": "gs://jc-references/hg19/hg19_ucsc/hg19_ucsc.fa",
+  "BQSR_SITES": "gs://jc-references/broad/hg19/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf,gs://jc-references/broad/hg19/1000G_phase1.indels.hg19.sites.vcf,gs://jc-references/broad/hg19/dbsnp_138.hg19.vcf",
+  "DBSNP": "gs://jc-references/broad/hg19/dbsnp_138.hg19.vcf",
+  "READGROUP": "@RG\\tID:my-rgid-1\\tSM:my-sm\\tPL:ILLUMINA,@RG\\tID:my-rgid-2\\tSM:my-sm\\tPL:ILLUMINA",
+  "DEDUP": "markdup",
+  "ZONES": "us-central1-a,us-central1-b,us-central1-c,us-central1-f",
+  "PROJECT_ID": "my-project-id",
+  "PIPELINE": "TNscope"
+}

@@ -1,0 +1,346 @@
+
+#------------------------------------------------------------------------------
+# Prerequisite for Google Genomics Pipelines
+# https://cloud.google.com/genomics/docs/tutorials/gatk
+#------------------------------------------------------------------------------
+
+Although Google Cloud Genomics and Sentieon pipelines support robust tools to obtain high quality VCFs from BAM files, obtaining VCF files from these pipelines is not a trivial task.  The problem is made worse when a BAM file has missing information in the header or an incomplete file structure to utilize GATK pipelines. The problem gets more complicated and challenging when the number of BAM files that needs to be processed is too large to rely on manual file management techniques and all of the files need to be transferred in and out of Google Cloud Storage. Therefore, we have implemented pipelines and source code for producing VCF files from BAM files by utilizing Google Cloud Genomics and Sentieon pipelines.
+
+/codes
+0. dsub.py          : Bam Preparation Tools for Genomic analysis - functions to be used in other codes
+1. addPL.py         : Adding PL flag in BAM header
+2. cleanSam.py      : Remove errors in BAM file
+3. fixMate.py       : Correct Mate Pair errors in BAM file
+4. sortBam.py       : Sort BAM files based on coordinates
+5. buildIndex.py    : Build index files xxxx.bam.bai
+6. cmpFiles.py      : Compare two lists and write same and differences - to check if output files are all produced without out error by checking the input and output file names
+7. InputSentieon.py : Write input lists to submit Sentieon jobs
+8. runGenPipe.py    : Submitting jobs to Genomics GATK Best Practice pipeline
+8. copyResults.sh   : Copy final results files into local disk
+
+/batch
+ 0. submit_batch.sh : Submitting Sentieon jobs (Official release https://github.com/Sentieon/sentieon-google-genomics/tree/master/batch)
+ 					  ** This code is developed by 'Don Freed', Bioinformatics Scientist, Sentieon **
+                      exmaple) bash submit_batch.sh batch.json batch_bam.tsv
+ 1. somatic.json    : configuration for somatic analysis
+ 2. germline.json   : configuration for germline analysis
+ 3. batch_fastq.tsv : an example of input lists (** column headers are used as variable when submitting a job)
+ 4. somatic_bam.tsv : an example of input lists for Sentieon somatic sentieon analysis
+ 5. germline_bam.tsv: an example of input lists for Sentieon germline analysis
+
+
+
+#------------------------------------------------------------------------------
+# Prerequisite for Sentieon Pipelines
+#------------------------------------------------------------------------------
+1. Install dsub
+	> git clone https://github.com/googlegenomics/dsub
+	> python setup.py install
+
+2. Install sentieon scripts
+	> git clone https://github.com/sentieon/sentieon-google-genomics.git
+	> cd sentieon-google-genomics
+
+
+#------------------------------------------------------------------------------
+# Prerequisite for Google Genomics Pipelines
+# https://cloud.google.com/genomics/docs/tutorials/gatk
+#------------------------------------------------------------------------------
+1. Install Could SDK
+    https://cloud.google.com/sdk/docs/
+
+2. Update and install gcloud components:
+    > gcloud components update &&
+    > gcloud components install alpha
+
+3. Install git to download the required files.
+    git clone https://github.com/openwdl/wdl.git
+    git clone https://github.com/gatk-workflows/broad-prod-wgs-germline-snps-indels.git
+
+
+
+
+#------------------------------------------------------------------------------
+# Sentieon DNAseq with BAM files
+# Docker for Picard and Samtools can be found in
+# - https://quay.io/search?q=gatk
+# - https://cloud.google.com/compute/docs/images
+# - https://hub.docker.com/  * search the program and use them in dsub 'Image'
+#------------------------------------------------------------------------------   
+1. Do & Test Sentieon with above scripts
+	- Match reference genome 
+	- all reference 'vcf' files need to be compressed with 'bcftools'
+	- Let's assume BAM files are required to add 'PL' information in the header 
+	- Follow GATK preprocessing steps above
+		1) CleanSam - Cleans the provided SAM/BAM, soft-clipping beyond-end-of-reference alignments and setting MAPQ to 0 for unmapped reads
+			java -Xmx8G -jar /local/programs/picard/picard.jar CleanSam \
+			    I=DNA.backward.bam \
+			    O=DNA.backward.clean.bam
+
+
+		2) ValidateSamFile
+			java -Xmx8G -jar /local/programs/picard/picard.jar ValidateSamFile \
+			    I=DNA.backward.clean.bam \
+			    MODE=SUMMARY
+
+
+	    3) FixMateInformation if Mate related errors are shown in ValidateSamFile (e.g., ERROR:MISMATCH_FLAG_MATE_NEG_STRAND, ERROR:MISMATCH_FLAG_MATE_UNMAPPED)
+		    java -Xmx8G -jar /local/programs/picard/picard.jar FixMateInformation \
+			    I=DNA.backward.clean.bam \
+			    O=DNA.backward.clean.FixMate.bam
+
+2. Check dsub status and cancel jobs
+	1) To check the status, run:
+	   	> dstat --project my-project-id --jobs '9-myjobsxxx--myjobid--180628-153525-81' --status '*'
+
+	2) To cancel the job, run:
+	   	> ddel --project my-project-id --jobs '9-myjobsxxx--myjobid--180628-153525-81'
+
+	3) list of jobs
+		> dstat --project 'my-project-id'
+
+3. Read dsub error log that is defined in dsub script (e.g., gs://my-log/dsub )
+
+
+#------------------------------------------------------------------------------
+# An example pipeline for Sentieon Haplotype
+# Haplotype Meaning
+# 	1) A cluster of tightly linked genes on a chromosome that are likely to be inherited together
+# 	2) A set of linked single-nucleotide polymorphism (SNP) alleles that tend to always occur together (HapMap)
+# 	3) An individual collection of specific mutations within a given genetic segment (e.g., per a gene, microsatellite)
+#
+# Pipelines
+# 	1) addPL.py
+# 	2) cleanSam.py
+# 	3) fixMate.py
+# 	4) sortBam.py
+# 	5) buildIndex.py
+#	6-1) InputSentieon.py 	# producing '.tsv' file
+#	6-2) batch bash submit_batch.sh batch.json batch_bam.tsv
+#------------------------------------------------------------------------------
+0. Prerequsite
+	https://cloud.google.com/genomics/docs/tutorials/sentieon
+
+1. Make the list of current GCP cloud storage 
+	> gsutil ls gs://gatk-bam | grep 'bam$' > gatk-bam_20170711_org.txt
+	> gsutil ls gs://vcf-to-bam | grep 'bam$' > vcf-to-bam_20170711_org.txt
+	> gsutil ls gs://vcf-to-bam2 | grep 'bam$' > vcf-to-bam2_20170711_org.txt
+	> gsutil ls gs://vcf-to-bam3 | grep 'bam$' > vcf-to-bam3_20170711_org.txt
+	> gsutil ls gs://vcf-to-bam4 | grep 'bam$' > vcf-to-bam4_20170711_org.txt
+
+2. Sync Object Storage and GCP cloud storage via 'rclone'
+	> rclone sync -v OBJS:/my/BAMs GS:gatk-bam
+
+3-1. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://gatk-bam | grep 'bam$' > gatk-bam_20170711_new.txt
+	> python cmpFiles.py -p my-project-id -r /my/inputs/gatk-bam_20170711_new.txt  -t /my/inputs/gatk-bam_20170711_org.txt -o /my/outputs/files
+
+3-2. ** Add platform information with 'missing.txt' file obtained from STEP 4
+	> python addPL.py -p my-project-id -i /my/outputs/files/missing.txt -o gs://vcf-to-bam -s /my/outputs/scripts/addPL
+	> dstat --project my-project-id
+
+4-1. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://vcf-to-bam | grep 'bam$' > vcf-to-bam_20170711_new.txt
+	> python cmpFiles.py -r /my/outputs/files/vcf-to-bam_20170711_new.txt  -t /my/outputs/files/vcf-to-bam2_20170712_new.txt -o /my/outputs/files/cmpfiles/vcf-to-bam2
+
+4-2. ** Run dsub/cleanSam.py
+	> python cleanSam.py -i /my/outputs/files/cmpfiles/vcf-to-bam2/missing.txt -o gs://vcf-to-bam2 -s /my/outputs/scripts/cleanSAM
+	> dstat --project my-project-id
+	:: possible errors ::
+	"Premature End Of File", "EOF marker is absent. The input is probably truncated"
+	Check with 
+	> samtools view -c <xxx.bam> 	#print only the count of matching records
+
+	This will show something like 
+	[E::bgzf_read] Read block operation failed with error -1 after 43 of 149 bytes
+	[main_samview] truncated file.
+
+	Solution> need to download again.
+
+5-1. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://vcf-to-bam2 | grep 'bam$' > vcf-to-bam2_20170716_new.txt
+	> python cmpFiles.py -r /my/outputs/files/vcf-to-bam2_20170716_new.txt  -t /my/outputs/files/vcf-to-bam2_20170711_org.txt -o /my/outputs/files/cmpfiles/vcf-to-bam2
+
+5-2. ** Run dsub/fixMate.py
+	> python fixMate.py -i /my/outputs/files/cmpfiles/vcf-to-bam2/missing.txt -o gs://vcf-to-bam3 -s /my/outputs/scripts/fixMate
+	> dstat --project my-project-id
+
+6-1. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://vcf-to-bam3 | grep 'bam$' > vcf-to-bam3_20170716_new.txt
+	> python cmpFiles.py -r /my/outputs/files/vcf-to-bam3_20170716_new.txt  -t /my/outputs/files/vcf-to-bam3_20170711_org.txt -o /my/outputs/files/cmpfiles/vcf-to-bam3
+
+6-2. ** Run dsub/sortBam.py
+	> python sortBam.py -p my-project-id -i /my/outputs/files/cmpfiles/vcf-to-bam3/missing.txt -o gs://vcf-to-bam4 -s /my/outputs/scripts/sortBam
+	> dstat --project my-project-id
+
+6-3. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://vcf-to-bam4 | grep 'bam$' > vcf-to-bam4_20170717_new.txt
+	> python cmpFiles.py -r /my/outputs/files/vcf-to-bam4_20170717_new.txt  -t /my/outputs/files/vcf-to-bam4_20170711_org.txt -o /my/outputs/files/cmpfiles/vcf-to-bam4
+
+6-4. ** Run dsub/buildIndex.py
+	> python buildBamIndex.py -p my-project-id -i /my/outputs/files/cmpfiles/vcf-to-bam4/missing.txt -o gs://vcf-to-bam4 -s /my/outputs/scripts/buildIdx
+	> dstat --project my-project-id
+
+6-5. ** Run dsub/InputSentieon.py
+	> python InputSentieon.py -i /my/outputs/files/cmpfiles/vcf-to-bam4/missing.txt -o /my/outputs/files/cmpfiles/vcf-to-bam4/bam4_InOut.tsv -s gs://my-sentieon
+
+6-6. ** Run batch/submit_batch.sh
+	> bash ./submit_batch.sh ./batch.json /my/outputs/files/cmpfiles/vcf-to-bam4/bam4_InOut.tsv
+
+** Example of batch.json **
+{
+  "REF": "gs://my-references/hg19/hg19_ucsc/hg19_ucsc.fa",
+  "BQSR_SITES": "gs://my-references/broad/hg19/Mills_and_1000G_gold_standard.indels.hg19.sites.vcf,gs://my-references/broad/hg19/1000G_phase1.indels.hg19.sites.vcf,gs://my-references/broad/hg19/dbsnp_138.hg19.vcf",
+  "DBSNP": "gs://my-references/broad/hg19/dbsnp_138.hg19.vcf",
+  "READGROUP": "@RG\\tID:my-rgid-1\\tSM:my-sm\\tPL:ILLUMINA,@RG\\tID:my-rgid-2\\tSM:my-sm\\tPL:ILLUMINA",
+  "DEDUP": "markdup",
+  "ZONES": "us-central1-a,us-central1-b,us-central1-c,us-central1-f",
+  "PROJECT_ID": "my-project-id"
+}
+
+7. Copy results into local drive 
+	* destination directory will be automatically created if it does not exist. 
+	* do not download if same local directory exists.
+	> bash copyResults.sh gs://my-sentieon /backup/bam2vcf
+
+
+#------------------------------------------------------------------------------
+# An example pipeline for Sentieon MuTec2
+# Pipelines
+# 	1) addPL.py
+# 	2) cleanSam.py
+# 	3) fixMate.py
+# 	4) sortBam.py
+# 	5) buildIndex.py 	<--- until here Same as HaplotypeCaller
+#------------------------------------------------------------------------------
+1. Get Somatic Mutation VCF from COSMIC DB (Catalogue Of Somatic Mutations In Cancer) - coding and non-coding mutations
+	1) Log in https://cancer.sanger.ac.uk/cosmic
+	2) Data > Downloads
+	3) Genome Version > GRCh37/h19, CRCh38/hg38 
+	4) Choose Coding/noncoding Mutations
+	5) 	> echo "email@example.com:mycosmicpassword" | base64
+		  amplb25nQGtjci51a3kuZWR1OnFydXF0YzAxCg==
+		> curl -H "Authorization: Basic amplb25nQGtjci51a3kuZWR1OnFydXF0YzAxCg==" https://cancer.sanger.ac.uk/cosmic/file_download/GRCh37/cosmic/v85/VCF/CosmicCodingMuts.vcf.gz
+			<URL_provided> - it will be expired 
+	6) Download data via provided URL
+		curl --output ./CosmicCodingMuts.vcf.gz <URL_provided>
+
+	7) Upload data into cloud storage
+		gsutil cp CosmicCodingMuts.vcf.gz gs://my-references/cosmic
+
+2. Get Panel of Normal VCF
+	1) Panel of Normal : remove variants associated with this VCF file 
+		- download data from The Exome Aggregation Consortium (ExAC) http://exac.broadinstitute.org/
+		- VCF is based on GRCh37/h19, Liftvoer GRCh38 version is only in Google Cloud Storage link can be found via http://exac.broadinstitute.org/downloads
+
+	2) DB SNP - DB SNPs are likely to be a germline since it is based on 1000 Genome projects and the purpose of this project was to figure out the nature of genetic diversity across different countries
+		Download from ftp://ftp.ncbi.nih.gov/snp/organisms/
+
+
+3. Submit with BASH script 
+	1) Change the column name 'BAM' to 'TUMOR_BAM' in '.tsv' file
+	2) In batch.json file, add 'PIPELINE' variable 
+		{
+		  "REF": "gs://my-references/hg19/hg19_ucsc/hg19_ucsc.fa",
+		  "DBSNP": "gs://my-references/broad/hg19/dbsnp_138.hg19.vcf",
+		  "ZONES": "us-central1-a,us-central1-b,us-central1-c,us-central1-f",
+		  "PROJECT_ID": "my-project-id”, 
+		  "PIPELINE": "TNscope"
+		}
+ 
+4. Filtering the variants with following files
+	1) Removing any variants from the VCF that are also present in dbSNP or ExAC (Exome Aggregation Consortium)
+		EXCETP BRCA1/2 and TP53 - these two MUST be kept
+	2) Keep variants listed in COSMIC 
+
+5. VCF Searching tools
+	1) VCF tools : http://vcftools.sourceforge.net/index.html
+	2) PYVCF : https://pyvcf.readthedocs.io/en/latest/index.html
+
+
+
+
+#------------------------------------------------------------------------------
+# An example for Google Genomics Pipelines
+# Pipelines
+# 	1) addPL.py
+# 	2) cleanSam.py
+# 	3) fixMate.py
+# 	4) sortBam.py
+# 	5) buildIndex.py 	<--- until here Same as Sentieon
+#	6) unmapBam.py
+# 	7) runGenPipe.py
+#------------------------------------------------------------------------------
+1. Make the list of current GCP cloud storage 
+	> gsutil ls gs://gatk-bam | grep 'bam$' > gatk-bam_20170711_org.txt
+	> gsutil ls gs://vcf-to-bam | grep 'bam$' > vcf-to-bam_20170711_org.txt
+	> gsutil ls gs://vcf-to-bam2 | grep 'bam$' > vcf-to-bam2_20170711_org.txt
+	> gsutil ls gs://vcf-to-bam3 | grep 'bam$' > vcf-to-bam3_20170711_org.txt
+	> gsutil ls gs://vcf-to-bam4 | grep 'bam$' > vcf-to-bam4_20170711_org.txt
+
+2. Sync UK Object Storage and GCP cloud storage
+	> rclone sync -v OBJS:/my/BAMs GS:gatk-bam
+
+3-1. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://gatk-bam | grep 'bam$' > gatk-bam_20170711_new.txt
+	> python cmpFiles.py -r /my/inputs/gatk-bam_20170711_new.txt  -t /my/inputs/gatk-bam_20170711_org.txt -o /my/outputs/files
+
+3-2. ** Add platform information with 'missing.txt' file obtained from STEP 4
+	> python addPL.py -p my-project-id -i /my/outputs/files/missing.txt -o gs://vcf-to-bam -s /my/outputs/scripts/addPL
+	> dstat --project my-project-id
+
+4-1. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://vcf-to-bam | grep 'bam$' > vcf-to-bam_20170711_new.txt
+	> python cmpFiles.py -r /my/outputs/files/vcf-to-bam_20170711_new.txt  -t /my/outputs/files/vcf-to-bam2_20170712_new.txt -o /my/outputs/files/cmpfiles/vcf-to-bam2
+
+4-2. ** Run dsub/cleanSam.py
+	> python cleanSam.py -i /my/outputs/files/cmpfiles/vcf-to-bam2/missing.txt -o gs://vcf-to-bam2 -s /my/outputs/scripts/cleanSAM
+	> dstat --project my-project-id
+	:: possible errors ::
+	"Premature End Of File", "EOF marker is absent. The input is probably truncated"
+	Check with 
+	> samtools view -c <xxx.bam> 	#print only the count of matching records
+
+	This will show something like 
+	[E::bgzf_read] Read block operation failed with error -1 after 43 of 149 bytes
+	[main_samview] truncated file.
+
+	Solution> need to download again.
+
+5-1. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://vcf-to-bam2 | grep 'bam$' > vcf-to-bam2_20170716_new.txt
+	> python cmpFiles.py -r /my/outputs/files/vcf-to-bam2_20170716_new.txt  -t /my/outputs/files/vcf-to-bam2_20170711_org.txt -o /my/outputs/files/cmpfiles/vcf-to-bam2
+
+5-2. ** Run dsub/fixMate.py
+	> python fixMate.py -p my-project-id -i /my/outputs/files/cmpfiles/vcf-to-bam2/missing.txt -o gs://vcf-to-bam3 -s /my/outputs/scripts/fixMate
+	> dstat --project my-project-id
+
+6-1. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://vcf-to-bam3 | grep 'bam$' > vcf-to-bam3_20170716_new.txt
+	> python cmpFiles.py -r /my/outputs/files/vcf-to-bam3_20170716_new.txt  -t /my/outputs/files/vcf-to-bam3_20170711_org.txt -o /my/outputs/files/cmpfiles/vcf-to-bam3
+
+6-2. ** Run dsub/sortBam.py
+	> python sortBam.py -p my-project-id -i /my/outputs/files/cmpfiles/vcf-to-bam3/missing.txt -o gs://vcf-to-bam4 -s /my/outputs/scripts/sortBam
+	> dstat --project my-project-id
+
+6-3. Make the list of current GCP cloud storage and find missing/candidates BAM files
+	> gsutil ls gs://vcf-to-bam4 | grep 'bam$' > vcf-to-bam4_20170717_new.txt
+	> python cmpFiles.py -r /my/outputs/files/vcf-to-bam4_20170717_new.txt  -t /my/outputs/files/vcf-to-bam4_20170711_org.txt -o /my/outputs/files/cmpfiles/vcf-to-bam4
+
+6-4. ** Run dsub/buildIndex.py
+	> python buildBamIndex.py -p my-project-id -i /my/outputs/files/cmpfiles/vcf-to-bam4/missing.txt -o gs://vcf-to-bam4 -s /my/outputs/scripts/buildIdx
+	> dstat --project my-project-id
+
+7-1. ** Run dsub/unmapBam.py
+	> python unmapBam.py -p my-project-id -i /my/outputs/files/vcf-to-bam4_20170717_new.txt -o gs://vcf-to-unmapbam -s /my/outputs/scripts/unmapBam
+	> dstat --project my-project-id
+
+7-2 Run Genomic Cloud Pipelines
+	> gsutil ls gs://vcf-to-unmapbam | grep 'bam$' > vcf-to-unmapbam_20170717.txt
+	> python runGenPipe.py -i /local/sentieon/dsub/inputs/vcf-to-unmapbam_20170717.txt \
+	-o gs://my-outputs \
+	-s /local/sentieon/dsub/inputs/Scripts/test \
+	-g /local/sentieon/gcgp/broad-prod-wgs-germline-snps-indels \
+	-w /local/sentieon/gcgp/wdl 
+
+

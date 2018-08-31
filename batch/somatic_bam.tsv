@@ -1,0 +1,7 @@
+TUMOR_BAM	OUTPUT_BUCKET
+gs://input-bam/wellformedBA1.bam	gs://output-bam/sample1
+gs://input-bam/wellformedBA2.bam	gs://output-bam/sample2
+gs://input-bam/wellformedBA3.bam	gs://output-bam/sample3
+gs://input-bam/wellformedBA4.bam	gs://output-bam/sample4
+gs://input-bam/wellformedBA5.bam	gs://output-bam/sample5
+gs://input-bam/wellformedBA6.bam	gs://output-bam/sample6
